@@ -16,6 +16,7 @@ RUN apk --no-cache add ca-certificates tzdata
 WORKDIR /app
 
 COPY --from=builder /app/covered-call-tracker .
+COPY --from=builder /app/templates ./templates
 
 EXPOSE 8080
 
