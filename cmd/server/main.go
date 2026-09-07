@@ -18,7 +18,11 @@ import (
 
 func main() {
 	// 1. Initialize Postgres connection
-	dbDSN := "postgres://tracker_user:tracker_password@localhost:5432/covered_call_tracker?sslmode=disable"
+	dbDSN := os.Getenv("DB_DSN")
+	if dbDSN == "" {
+		dbDSN = "postgres://tracker_user:tracker_password@localhost:5432/covered_call_tracker?sslmode=disable"
+	}
+
 	db, err := sql.Open("postgres", dbDSN)
 	if err != nil {
 		log.Fatalf("Failed connecting to Postgres: %v", err)
