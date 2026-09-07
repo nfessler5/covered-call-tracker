@@ -1,0 +1,241 @@
+openapi: 3.0.3
+info:
+    title: Covered Call Tracker API
+    description: API for tracking underlying stock cost basis, option positions, and contract rolls.
+    version: 0.0.1
+servers:
+    - url: http://localhost:8080
+paths:
+    /positions:
+        get:
+            tags:
+                - positions
+            summary: list positions
+            description: List active or historical covered call positions.
+            operationId: positions#list
+            parameters:
+                - name: status
+                  in: query
+                  description: Filter by status (OPEN, EXPIRED, ASSIGNED, ROLLED, CLOSED)
+                  allowEmptyValue: true
+                  schema:
+                    type: string
+                    description: Filter by status (OPEN, EXPIRED, ASSIGNED, ROLLED, CLOSED)
+                    example: Aut corrupti magnam.
+                  example: Qui recusandae qui incidunt praesentium quo.
+            responses:
+                "200":
+                    description: OK response.
+                    content:
+                        application/json:
+                            schema:
+                                type: array
+                                items:
+                                    $ref: '#/components/schemas/CoveredCallPosition'
+                                example:
+                                    - contracts_count: 1
+                                      expiration_date: "2026-09-18"
+                                      id: 10
+                                      premium_collected: 150
+                                      status: OPEN
+                                      strike_price: 30
+                                      underlying_id: 1
+                                    - contracts_count: 1
+                                      expiration_date: "2026-09-18"
+                                      id: 10
+                                      premium_collected: 150
+                                      status: OPEN
+                                      strike_price: 30
+                                      underlying_id: 1
+                            example:
+                                - contracts_count: 1
+                                  expiration_date: "2026-09-18"
+                                  id: 10
+                                  premium_collected: 150
+                                  status: OPEN
+                                  strike_price: 30
+                                  underlying_id: 1
+                                - contracts_count: 1
+                                  expiration_date: "2026-09-18"
+                                  id: 10
+                                  premium_collected: 150
+                                  status: OPEN
+                                  strike_price: 30
+                                  underlying_id: 1
+        post:
+            tags:
+                - positions
+            summary: create positions
+            description: Open a new covered call position.
+            operationId: positions#create
+            requestBody:
+                description: Request body for create.
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CoveredCallPosition'
+                        example:
+                            contracts_count: 1
+                            expiration_date: "2026-09-18"
+                            id: 10
+                            premium_collected: 150
+                            status: OPEN
+                            strike_price: 30
+                            underlying_id: 1
+            responses:
+                "201":
+                    description: Created response.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CoveredCallPosition'
+                            example:
+                                contracts_count: 1
+                                expiration_date: "2026-09-18"
+                                id: 10
+                                premium_collected: 150
+                                status: OPEN
+                                strike_price: 30
+                                underlying_id: 1
+    /positions/{id}/roll:
+        post:
+            tags:
+                - positions
+            summary: roll positions
+            description: Close an existing position as ROLLED and create a new open position in one atomic transaction.
+            operationId: positions#roll
+            parameters:
+                - name: id
+                  in: path
+                  description: ID of the position being rolled
+                  required: true
+                  schema:
+                    type: integer
+                    description: ID of the position being rolled
+                    example: 3190368447098624533
+                    format: int64
+                  example: 3381507194753881773
+            requestBody:
+                description: Request body for roll.
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RollRequestBody'
+                        example:
+                            roll_details:
+                                net_credit: 45
+                                new_expiration_date: "2026-09-25"
+                                new_strike_price: 32
+            responses:
+                "200":
+                    description: OK response.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CoveredCallPosition'
+                            example:
+                                contracts_count: 1
+                                expiration_date: "2026-09-18"
+                                id: 10
+                                premium_collected: 150
+                                status: OPEN
+                                strike_price: 30
+                                underlying_id: 1
+components:
+    schemas:
+        CoveredCallPosition:
+            type: object
+            properties:
+                contracts_count:
+                    type: integer
+                    description: Number of contracts sold
+                    example: 1
+                    format: int64
+                expiration_date:
+                    type: string
+                    description: Expiration Date (YYYY-MM-DD)
+                    example: "2026-09-18"
+                id:
+                    type: integer
+                    description: Unique Position ID
+                    example: 10
+                    format: int64
+                premium_collected:
+                    type: number
+                    description: Total premium collected for the contracts
+                    example: 150
+                    format: double
+                status:
+                    type: string
+                    description: 'Status: OPEN, EXPIRED, ASSIGNED, ROLLED, CLOSED'
+                    example: OPEN
+                strike_price:
+                    type: number
+                    description: Option Strike Price
+                    example: 30
+                    format: double
+                underlying_id:
+                    type: integer
+                    description: ID of the underlying stock
+                    example: 1
+                    format: int64
+            description: An open or historical covered call options contract.
+            example:
+                contracts_count: 1
+                expiration_date: "2026-09-18"
+                id: 10
+                premium_collected: 150
+                status: OPEN
+                strike_price: 30
+                underlying_id: 1
+            required:
+                - underlying_id
+                - strike_price
+                - expiration_date
+                - premium_collected
+                - contracts_count
+                - status
+        RollPositionPayload:
+            type: object
+            properties:
+                net_credit:
+                    type: number
+                    description: Net credit collected (or debit paid) during the roll
+                    example: 45
+                    format: double
+                new_expiration_date:
+                    type: string
+                    description: New expiration date (YYYY-MM-DD)
+                    example: "2026-09-25"
+                new_strike_price:
+                    type: number
+                    description: New strike price
+                    example: 32
+                    format: double
+            description: Parameters required to roll an existing position into a new expiration and strike.
+            example:
+                net_credit: 45
+                new_expiration_date: "2026-09-25"
+                new_strike_price: 32
+            required:
+                - new_strike_price
+                - new_expiration_date
+                - net_credit
+        RollRequestBody:
+            type: object
+            properties:
+                roll_details:
+                    $ref: '#/components/schemas/RollPositionPayload'
+            description: Request body for roll.
+            example:
+                roll_details:
+                    net_credit: 45
+                    new_expiration_date: "2026-09-25"
+                    new_strike_price: 32
+            required:
+                - roll_details
+tags:
+    - name: positions
+      description: Service for managing covered call positions.
