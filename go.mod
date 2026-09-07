@@ -3,6 +3,7 @@ module covered-call-tracker
 go 1.27.1
 
 require (
+	github.com/lib/pq v1.12.3
 	goa.design/clue v1.2.6
 	goa.design/goa/v3 v3.30.0
 )
