@@ -3,7 +3,7 @@ package scanner
 import (
 	"time"
 
-	"github.com/nfessler5/covered-call-tracker/internal/provider"
+	"covered-call-tracker/internal/provider"
 )
 
 type Engine struct {

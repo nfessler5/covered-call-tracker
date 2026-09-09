@@ -2,18 +2,60 @@ package design
 
 import (
 	. "goa.design/goa/v3/dsl"
-	. "goa.design/goa/v3/eval"
 )
 
 // API Level Metadata
 var _ = API("covered_call_tracker", func() {
 	Title("Covered Call Tracker API")
 	Description("API for tracking underlying stock cost basis, option positions, and contract rolls.")
+
+	HTTP(func() {
+		Path("/")
+	})
+
 	Server("tracker", func() {
 		Host("localhost", func() {
 			URI("http://localhost:8080")
 		})
 	})
+})
+
+// User Data Models & Service
+var User = Type("User", func() {
+	Description("User profile details")
+	Field(1, "id", Int64, "Unique User ID", func() { Example(1) })
+	Field(2, "email", String, "User Email Address", func() { Example("user@example.com") })
+	Field(3, "username", String, "Username", func() { Example("trader123") })
+	Required("id", "email", "username")
+})
+
+var _ = Service("users", func() {
+	Description("Service for managing application users.")
+
+	Method("get", func() {
+		Description("Get user profile by ID.")
+		Payload(func() {
+			Field(1, "id", Int64, "User ID")
+			Required("id")
+		})
+		Result(User)
+		HTTP(func() {
+			GET("/users/{id}")
+			Response(StatusOK)
+		})
+	})
+})
+
+// Scanner Service & Data Types
+var Candidate = Type("Candidate", func() {
+	Description("A potential covered call candidate found by the scanning engine.")
+	Field(1, "ticker", String, "Stock Ticker Symbol")
+	Field(2, "stock_price", Float64, "Current underlying stock price")
+	Field(3, "strike_price", Float64, "Option Strike Price")
+	Field(4, "expiration_date", String, "Expiration Date (YYYY-MM-DD)")
+	Field(5, "premium", Float64, "Option Premium Price")
+	Field(6, "annualized_yield", Float64, "Calculated annualized return yield %")
+	Required("ticker", "stock_price", "strike_price", "expiration_date", "premium", "annualized_yield")
 })
 
 var _ = Service("scanner", func() {
@@ -33,16 +75,7 @@ var _ = Service("scanner", func() {
 	})
 })
 
-var Candidate = Type("Candidate", func() {
-	Field(1, "ticker", String)
-	Field(2, "stock_price", Float64)
-	Field(3, "strike_price", Float64)
-	Field(4, "expiration_date", String)
-	Field(5, "premium", Float64)
-	Field(6, "annualized_yield", Float64)
-})
-
-// Data Models
+// Portfolio Data Models
 var UnderlyingStock = Type("UnderlyingStock", func() {
 	Description("A stock held in the portfolio for selling covered calls.")
 	Field(1, "id", Int, "Unique ID", func() { Example(1) })
@@ -73,7 +106,7 @@ var RollPositionPayload = Type("RollPositionPayload", func() {
 	Required("new_strike_price", "new_expiration_date", "net_credit")
 })
 
-// Service Endpoints
+// Position Management Service
 var _ = Service("positions", func() {
 	Description("Service for managing covered call positions.")
 
