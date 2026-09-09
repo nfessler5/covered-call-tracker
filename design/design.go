@@ -2,6 +2,7 @@ package design
 
 import (
 	. "goa.design/goa/v3/dsl"
+	. "goa.design/goa/v3/eval"
 )
 
 // API Level Metadata
@@ -13,6 +14,32 @@ var _ = API("covered_call_tracker", func() {
 			URI("http://localhost:8080")
 		})
 	})
+})
+
+var _ = Service("scanner", func() {
+	Description("In-app scanning engine service")
+
+	Method("scan", func() {
+		Payload(func() {
+			Field(1, "tickers", ArrayOf(String), "List of tickers to scan")
+			Field(2, "min_annualized_yield", Float64, "Minimum annual return yield %")
+			Required("tickers")
+		})
+		Result(ArrayOf(Candidate))
+		HTTP(func() {
+			POST("/api/v1/scanner/run")
+			Response(StatusOK)
+		})
+	})
+})
+
+var Candidate = Type("Candidate", func() {
+	Field(1, "ticker", String)
+	Field(2, "stock_price", Float64)
+	Field(3, "strike_price", Float64)
+	Field(4, "expiration_date", String)
+	Field(5, "premium", Float64)
+	Field(6, "annualized_yield", Float64)
 })
 
 // Data Models

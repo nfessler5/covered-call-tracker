@@ -1,0 +1,19 @@
+CREATE TABLE IF NOT EXISTS scan_runs (
+    id BIGSERIAL PRIMARY KEY,
+    run_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    candidates_found INT DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS scanner_alerts (
+    id BIGSERIAL PRIMARY KEY,
+    scan_run_id BIGINT REFERENCES scan_runs(id) ON DELETE CASCADE,
+    ticker VARCHAR(10) NOT NULL,
+    stock_price NUMERIC(10, 2) NOT NULL,
+    strike_price NUMERIC(10, 2) NOT NULL,
+    expiration_date DATE NOT NULL,
+    bid NUMERIC(10, 2) NOT NULL,
+    ask NUMERIC(10, 2) NOT NULL,
+    annualized_yield NUMERIC(6, 2) NOT NULL,
+    status VARCHAR(20) DEFAULT 'UNVIEWED',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);

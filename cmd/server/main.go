@@ -49,6 +49,9 @@ func main() {
 	}
 
 	http.HandleFunc("/", uiHandler.RenderFullDashboard)
+	http.HandleFunc("/ui/position/detail", uiHandler.RenderPositionDetails)
+	http.HandleFunc("/ui/position/roll", uiHandler.RollPositionHandler)
+	http.HandleFunc("/ui/position/status", uiHandler.UpdatePositionStatusHandler)
 	http.HandleFunc("/ui/positions", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			uiHandler.CreatePositionHandler(w, r)

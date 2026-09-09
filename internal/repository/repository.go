@@ -5,66 +5,141 @@ import (
 	"database/sql"
 )
 
-// Domain models
-type UnderlyingStock struct {
-	ID                 int
-	Ticker             string
-	CompanyName        string
-	SharesOwned        int
-	EffectiveCostBasis float64
-}
-
 type CoveredCallPosition struct {
-	ID               int
-	UnderlyingID     int
-	StrikePrice      float64
-	ExpirationDate   string
-	PremiumCollected float64
-	ContractsCount   int
-	Status           string
+	ID               int64   `json:"id"`
+	UnderlyingID     int     `json:"underlying_id"`
+	Ticker           string  `json:"ticker"`
+	SharesCostBasis  float64 `json:"shares_cost_basis"` // Purchase price per share
+	StrikePrice      float64 `json:"strike_price"`
+	ExpirationDate   string  `json:"expiration_date"`
+	ContractsCount   int     `json:"contracts_count"`
+	PremiumCollected float64 `json:"premium_collected"`
+	Status           string  `json:"status"`
 }
 
-// Repository Interface
+// EffectiveCostBasis calculates break-even price per share after option premium
+func (p *CoveredCallPosition) EffectiveCostBasis() float64 {
+	if p.ContractsCount == 0 {
+		return p.SharesCostBasis
+	}
+	premiumPerShare := p.PremiumCollected / float64(p.ContractsCount*100)
+	return p.SharesCostBasis - premiumPerShare
+}
+
+// MaxROI calculates potential return on investment if shares are assigned at strike
+func (p *CoveredCallPosition) MaxROI() float64 {
+	if p.SharesCostBasis <= 0 {
+		return 0.0
+	}
+	premiumPerShare := p.PremiumCollected / float64(p.ContractsCount*100)
+	capitalGainPerShare := p.StrikePrice - p.SharesCostBasis
+	totalProfitPerShare := capitalGainPerShare + premiumPerShare
+	return (totalProfitPerShare / p.SharesCostBasis) * 100
+}
+
 type Repository interface {
-	GetUnderlyingStocks(ctx context.Context) ([]*UnderlyingStock, error)
 	GetPositionsByStatus(ctx context.Context, status string) ([]*CoveredCallPosition, error)
+	GetPositionByID(ctx context.Context, id int64) (*CoveredCallPosition, error)
 	CreatePosition(ctx context.Context, pos *CoveredCallPosition) (*CoveredCallPosition, error)
+	GetOrCreateUnderlyingAsset(ctx context.Context, ticker string) (int, error)
+	UpdatePositionStatus(ctx context.Context, id int64, status string) error
+	RollPosition(ctx context.Context, oldID int64, newStrike float64, newExpiration string, netCredit float64) error
 }
 
-// Postgres Repository Struct
+// RollPosition handles closing the existing position and creating the rolled position
+func (r *postgresRepo) RollPosition(ctx context.Context, oldID int64, newStrike float64, newExpiration string, netCredit float64) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// 1. Fetch current position details
+	var current CoveredCallPosition
+	query := `SELECT underlying_id, shares_cost_basis, contracts_count FROM covered_call_positions WHERE id = $1`
+	if err := tx.QueryRowContext(ctx, query, oldID).Scan(&current.UnderlyingID, &current.SharesCostBasis, &current.ContractsCount); err != nil {
+		return err
+	}
+
+	// 2. Mark current position as ROLLED
+	if _, err := tx.ExecContext(ctx, "UPDATE covered_call_positions SET status = 'ROLLED' WHERE id = $1", oldID); err != nil {
+		return err
+	}
+
+	// 3. Insert the new rolled position with updated strike, expiration, and net credit
+	insertQuery := `
+		INSERT INTO covered_call_positions 
+		(underlying_id, shares_cost_basis, strike_price, expiration_date, contracts_count, premium_collected, status)
+		VALUES ($1, $2, $3, $4, $5, $6, 'OPEN')
+	`
+	if _, err := tx.ExecContext(ctx, insertQuery, current.UnderlyingID, current.SharesCostBasis, newStrike, newExpiration, current.ContractsCount, netCredit); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (r *postgresRepo) GetPositionByID(ctx context.Context, id int64) (*CoveredCallPosition, error) {
+	query := `
+		SELECT 
+			p.id, p.underlying_id, COALESCE(u.ticker, 'UNKNOWN') AS ticker,
+			COALESCE(p.shares_cost_basis, 0.00) AS shares_cost_basis,
+			p.strike_price, p.expiration_date, p.contracts_count, 
+			p.premium_collected, p.status
+		FROM covered_call_positions p
+		LEFT JOIN underlying_assets u ON p.underlying_id = u.id
+		WHERE p.id = $1
+	`
+	var p CoveredCallPosition
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
+		&p.ID, &p.UnderlyingID, &p.Ticker, &p.SharesCostBasis, &p.StrikePrice,
+		&p.ExpirationDate, &p.ContractsCount, &p.PremiumCollected, &p.Status,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+func (r *postgresRepo) UpdatePositionStatus(ctx context.Context, id int64, status string) error {
+	_, err := r.db.ExecContext(ctx, "UPDATE covered_call_positions SET status = $1 WHERE id = $2", status, id)
+	return err
+}
+
 type postgresRepo struct {
 	db *sql.DB
 }
 
-// Constructor function
 func NewPostgresRepository(db *sql.DB) Repository {
 	return &postgresRepo{db: db}
 }
 
-// GetUnderlyingStocks fetches all stocks from the database
-func (r *postgresRepo) GetUnderlyingStocks(ctx context.Context) ([]*UnderlyingStock, error) {
-	query := `SELECT id, ticker, company_name, shares_owned, effective_cost_basis FROM underlying_stocks`
-	rows, err := r.db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, err
+func (r *postgresRepo) GetOrCreateUnderlyingAsset(ctx context.Context, ticker string) (int, error) {
+	var id int
+	err := r.db.QueryRowContext(ctx, "SELECT id FROM underlying_assets WHERE ticker = $1", ticker).Scan(&id)
+	if err == nil {
+		return id, nil
 	}
-	defer rows.Close()
 
-	var stocks []*UnderlyingStock
-	for rows.Next() {
-		s := &UnderlyingStock{}
-		if err := rows.Scan(&s.ID, &s.Ticker, &s.CompanyName, &s.SharesOwned, &s.EffectiveCostBasis); err != nil {
-			return nil, err
-		}
-		stocks = append(stocks, s)
+	err = r.db.QueryRowContext(ctx, "INSERT INTO underlying_assets (ticker) VALUES ($1) RETURNING id", ticker).Scan(&id)
+	if err != nil {
+		return 0, err
 	}
-	return stocks, nil
+	return id, nil
 }
 
-// GetPositionsByStatus fetches positions filtered by status (e.g. OPEN, EXPIRED)
 func (r *postgresRepo) GetPositionsByStatus(ctx context.Context, status string) ([]*CoveredCallPosition, error) {
-	query := `SELECT id, underlying_id, strike_price, expiration_date, premium_collected, contracts_count, status 
-	          FROM covered_call_positions WHERE status = $1`
+	query := `
+		SELECT 
+			p.id, p.underlying_id, COALESCE(u.ticker, 'UNKNOWN') AS ticker,
+			COALESCE(p.shares_cost_basis, 0.00) AS shares_cost_basis,
+			p.strike_price, p.expiration_date, p.contracts_count, 
+			p.premium_collected, p.status
+		FROM covered_call_positions p
+		LEFT JOIN underlying_assets u ON p.underlying_id = u.id
+		WHERE p.status = $1
+		ORDER BY p.id DESC
+	`
 	rows, err := r.db.QueryContext(ctx, query, status)
 	if err != nil {
 		return nil, err
@@ -73,20 +148,30 @@ func (r *postgresRepo) GetPositionsByStatus(ctx context.Context, status string) 
 
 	var positions []*CoveredCallPosition
 	for rows.Next() {
-		p := &CoveredCallPosition{}
-		if err := rows.Scan(&p.ID, &p.UnderlyingID, &p.StrikePrice, &p.ExpirationDate, &p.PremiumCollected, &p.ContractsCount, &p.Status); err != nil {
+		var p CoveredCallPosition
+		if err := rows.Scan(
+			&p.ID, &p.UnderlyingID, &p.Ticker, &p.SharesCostBasis, &p.StrikePrice,
+			&p.ExpirationDate, &p.ContractsCount, &p.PremiumCollected, &p.Status,
+		); err != nil {
 			return nil, err
 		}
-		positions = append(positions, p)
+		positions = append(positions, &p)
 	}
 	return positions, nil
 }
 
-// CreatePosition inserts a new covered call position
 func (r *postgresRepo) CreatePosition(ctx context.Context, pos *CoveredCallPosition) (*CoveredCallPosition, error) {
-	query := `INSERT INTO covered_call_positions (underlying_id, strike_price, expiration_date, premium_collected, contracts_count, status)
-	          VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`
-	err := r.db.QueryRowContext(ctx, query, pos.UnderlyingID, pos.StrikePrice, pos.ExpirationDate, pos.PremiumCollected, pos.ContractsCount, pos.Status).Scan(&pos.ID)
+	query := `
+		INSERT INTO covered_call_positions 
+			(underlying_id, shares_cost_basis, strike_price, expiration_date, contracts_count, premium_collected, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id
+	`
+	err := r.db.QueryRowContext(ctx, query,
+		pos.UnderlyingID, pos.SharesCostBasis, pos.StrikePrice, pos.ExpirationDate,
+		pos.ContractsCount, pos.PremiumCollected, pos.Status,
+	).Scan(&pos.ID)
+
 	if err != nil {
 		return nil, err
 	}
