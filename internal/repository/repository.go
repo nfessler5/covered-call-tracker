@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"time"
 )
 
 // Domain Models
@@ -23,6 +24,27 @@ type CoveredCallPosition struct {
 	ContractsCount   int     `json:"contracts_count"`
 	PremiumCollected float64 `json:"premium_collected"`
 	Status           string  `json:"status"`
+}
+
+type ScanFilter struct {
+	MinYieldPct float64 `json:"min_yield_pct"`
+	MaxDTE      int     `json:"max_dte"`
+	MinDelta    float64 `json:"min_delta"`
+	MaxDelta    float64 `json:"max_delta"`
+}
+
+type ScanCandidate struct {
+	ID               string  `json:"id"`
+	UnderlyingSymbol string  `json:"underlying_symbol"`
+	StockPrice       float64 `json:"stock_price"`
+	OptionStrike     float64 `json:"option_strike"`
+	ExpirationDate   string  `json:"expiration_date"`
+	DTE              int     `json:"dte"`
+	Bid              float64 `json:"bid"`
+	Ask              float64 `json:"ask"`
+	Delta            float64 `json:"delta"`
+	MaxYieldPct      float64 `json:"max_yield_pct"`
+	DownsideProtect  float64 `json:"downside_protect"`
 }
 
 // EffectiveCostBasis calculates break-even price per share after option premium
@@ -65,6 +87,7 @@ type PositionRepository interface {
 type Repository interface {
 	PositionRepository
 	UserRepository
+	GetScanCandidates(ctx context.Context, filter ScanFilter) ([]ScanCandidate, error)
 }
 
 // Postgres Implementation
@@ -117,16 +140,16 @@ func (r *postgresRepo) GetOrCreateUnderlyingAsset(ctx context.Context, ticker st
 
 func (r *postgresRepo) GetPositionsByStatus(ctx context.Context, status string) ([]*CoveredCallPosition, error) {
 	query := `
-        SELECT 
-            p.id, p.underlying_id, COALESCE(u.ticker, 'UNKNOWN') AS ticker,
-            COALESCE(p.shares_cost_basis, 0.00) AS shares_cost_basis,
-            p.strike_price, p.expiration_date, p.contracts_count, 
-            p.premium_collected, p.status
-        FROM covered_call_positions p
-        LEFT JOIN underlying_assets u ON p.underlying_id = u.id
-        WHERE p.status = $1
-        ORDER BY p.id DESC
-    `
+		SELECT 
+			p.id, p.underlying_id, COALESCE(u.ticker, 'UNKNOWN') AS ticker,
+			COALESCE(p.shares_cost_basis, 0.00) AS shares_cost_basis,
+			p.strike_price, p.expiration_date, p.contracts_count, 
+			p.premium_collected, p.status
+		FROM covered_call_positions p
+		LEFT JOIN underlying_assets u ON p.underlying_id = u.id
+		WHERE p.status = $1
+		ORDER BY p.id DESC
+	`
 	rows, err := r.db.QueryContext(ctx, query, status)
 	if err != nil {
 		return nil, err
@@ -149,15 +172,15 @@ func (r *postgresRepo) GetPositionsByStatus(ctx context.Context, status string) 
 
 func (r *postgresRepo) GetPositionByID(ctx context.Context, id int64) (*CoveredCallPosition, error) {
 	query := `
-        SELECT 
-            p.id, p.underlying_id, COALESCE(u.ticker, 'UNKNOWN') AS ticker,
-            COALESCE(p.shares_cost_basis, 0.00) AS shares_cost_basis,
-            p.strike_price, p.expiration_date, p.contracts_count, 
-            p.premium_collected, p.status
-        FROM covered_call_positions p
-        LEFT JOIN underlying_assets u ON p.underlying_id = u.id
-        WHERE p.id = $1
-    `
+		SELECT 
+			p.id, p.underlying_id, COALESCE(u.ticker, 'UNKNOWN') AS ticker,
+			COALESCE(p.shares_cost_basis, 0.00) AS shares_cost_basis,
+			p.strike_price, p.expiration_date, p.contracts_count, 
+			p.premium_collected, p.status
+		FROM covered_call_positions p
+		LEFT JOIN underlying_assets u ON p.underlying_id = u.id
+		WHERE p.id = $1
+	`
 	var p CoveredCallPosition
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&p.ID, &p.UnderlyingID, &p.Ticker, &p.SharesCostBasis, &p.StrikePrice,
@@ -171,11 +194,11 @@ func (r *postgresRepo) GetPositionByID(ctx context.Context, id int64) (*CoveredC
 
 func (r *postgresRepo) CreatePosition(ctx context.Context, pos *CoveredCallPosition) (*CoveredCallPosition, error) {
 	query := `
-        INSERT INTO covered_call_positions 
-            (underlying_id, shares_cost_basis, strike_price, expiration_date, contracts_count, premium_collected, status)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING id
-    `
+		INSERT INTO covered_call_positions 
+			(underlying_id, shares_cost_basis, strike_price, expiration_date, contracts_count, premium_collected, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id
+	`
 	err := r.db.QueryRowContext(ctx, query,
 		pos.UnderlyingID, pos.SharesCostBasis, pos.StrikePrice, pos.ExpirationDate,
 		pos.ContractsCount, pos.PremiumCollected, pos.Status,
@@ -213,13 +236,54 @@ func (r *postgresRepo) RollPosition(ctx context.Context, oldID int64, newStrike 
 
 	// 3. Insert new rolled position
 	insertQuery := `
-        INSERT INTO covered_call_positions 
-        (underlying_id, shares_cost_basis, strike_price, expiration_date, contracts_count, premium_collected, status)
-        VALUES ($1, $2, $3, $4, $5, $6, 'OPEN')
-    `
+		INSERT INTO covered_call_positions 
+		(underlying_id, shares_cost_basis, strike_price, expiration_date, contracts_count, premium_collected, status)
+		VALUES ($1, $2, $3, $4, $5, $6, 'OPEN')
+	`
 	if _, err := tx.ExecContext(ctx, insertQuery, current.UnderlyingID, current.SharesCostBasis, newStrike, newExpiration, current.ContractsCount, netCredit); err != nil {
 		return err
 	}
 
 	return tx.Commit()
+}
+
+// GetScanCandidates queries recent scan candidates matching user filters
+func (r *postgresRepo) GetScanCandidates(ctx context.Context, filter ScanFilter) ([]ScanCandidate, error) {
+	query := `
+		SELECT 
+			c.id, COALESCE(u.ticker, 'UNKNOWN') AS ticker,
+			c.stock_price, c.strike_price, c.expiration_date,
+			c.bid, c.ask, c.annualized_yield
+		FROM scan_candidates c
+		LEFT JOIN underlying_assets u ON c.underlying_id = u.id
+		WHERE ($1 = 0.0 OR c.annualized_yield >= $1)
+		ORDER BY c.annualized_yield DESC
+		LIMIT 50
+	`
+	rows, err := r.db.QueryContext(ctx, query, filter.MinYieldPct)
+	if err != nil {
+		// If scan_candidates table is empty or missing during initial UI test, return empty slice
+		return []ScanCandidate{}, nil
+	}
+	defer rows.Close()
+
+	var candidates []ScanCandidate
+	for rows.Next() {
+		var c ScanCandidate
+		var rawExp time.Time
+		if err := rows.Scan(
+			&c.ID, &c.UnderlyingSymbol, &c.StockPrice, &c.OptionStrike,
+			&rawExp, &c.Bid, &c.Ask, &c.MaxYieldPct,
+		); err != nil {
+			return nil, err
+		}
+		c.ExpirationDate = rawExp.Format("2006-01-02")
+		c.DTE = int(time.Until(rawExp).Hours() / 24)
+		if filter.MaxDTE > 0 && c.DTE > filter.MaxDTE {
+			continue
+		}
+		candidates = append(candidates, c)
+	}
+
+	return candidates, nil
 }

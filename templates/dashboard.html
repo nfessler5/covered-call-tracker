@@ -1,29 +1,62 @@
 {{ define "content" }}
 <div class="space-y-6">
-    <!-- Header Summary -->
-    <div class="flex justify-between items-center">
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 w-full mr-4">
-            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
-                <div class="text-xs text-slate-400 uppercase font-semibold">Active Contracts</div>
-                <div class="text-2xl font-bold text-slate-100 mt-1">{{ len .Positions }}</div>
-            </div>
-            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
-                <div class="text-xs text-slate-400 uppercase font-semibold">Total Premium Collected</div>
-                <div class="text-2xl font-bold text-emerald-400 mt-1">${{ printf "%.2f" .TotalPremium }}</div>
-            </div>
-            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
-                <div class="text-xs text-slate-400 uppercase font-semibold">Status</div>
-                <div class="text-2xl font-bold text-blue-400 mt-1">Poller Active</div>
-            </div>
-        </div>
 
-        <button onclick="document.getElementById('new-position-modal').classList.remove('hidden')"
-                class="px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl shadow-lg transition whitespace-nowrap">
-            + New Position
+    <!-- Top Navigation Tabs -->
+    <div class="flex items-center space-x-2 border-b border-slate-700/80 pb-3">
+        <button id="tab-positions-btn"
+                onclick="switchTab('positions')"
+                class="px-4 py-2 text-sm font-semibold text-emerald-400 bg-slate-800 border-b-2 border-emerald-500 rounded-t-lg transition flex items-center gap-2">
+            <span>Active Positions</span>
+            <span class="px-2 py-0.5 text-xs bg-emerald-500/10 text-emerald-400 rounded-full border border-emerald-500/20">
+                {{ len .Positions }}
+            </span>
+        </button>
+
+        <button id="tab-scanner-btn"
+                onclick="switchTab('scanner')"
+                hx-get="/ui/scanner"
+                hx-target="#scanner-tab-content"
+                hx-swap="innerHTML"
+                class="px-4 py-2 text-sm font-semibold text-slate-400 hover:text-slate-200 border-b-2 border-transparent transition flex items-center gap-2">
+            <span>Option Scanner</span>
+            <span class="text-xs text-slate-500"></span>
         </button>
     </div>
 
-    {{ template "positions-table" . }}
+    <!-- Tab 1: Active Positions View -->
+    <div id="positions-tab-content" class="space-y-6">
+        <!-- Header Summary -->
+        <div class="flex justify-between items-center">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 w-full mr-4">
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                    <div class="text-xs text-slate-400 uppercase font-semibold">Active Contracts</div>
+                    <div class="text-2xl font-bold text-slate-100 mt-1">{{ len .Positions }}</div>
+                </div>
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                    <div class="text-xs text-slate-400 uppercase font-semibold">Total Premium Collected</div>
+                    <div class="text-2xl font-bold text-emerald-400 mt-1">${{ printf "%.2f" .TotalPremium }}</div>
+                </div>
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                    <div class="text-xs text-slate-400 uppercase font-semibold">Status</div>
+                    <div class="text-2xl font-bold text-blue-400 mt-1">Poller Active</div>
+                </div>
+            </div>
+
+            <button onclick="document.getElementById('new-position-modal').classList.remove('hidden')"
+                    class="px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl shadow-lg transition whitespace-nowrap">
+                + New Position
+            </button>
+        </div>
+
+        {{ template "positions-table" . }}
+    </div>
+
+    <!-- Tab 2: Option Scanner View (Loaded via HTMX) -->
+    <div id="scanner-tab-content" class="hidden">
+        <div class="p-8 text-center text-slate-500 bg-slate-800/50 rounded-xl border border-slate-700/60 animate-pulse">
+            Loading scanner candidates...
+        </div>
+    </div>
 
     <!-- Action Drawer Overlay -->
     <div id="action-drawer" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex justify-end">
@@ -91,6 +124,30 @@
         </div>
     </div>
 </div>
+
+<!-- Tab Switcher Handler -->
+<script>
+function switchTab(tabName) {
+    const posContent = document.getElementById('positions-tab-content');
+    const scanContent = document.getElementById('scanner-tab-content');
+    const posBtn = document.getElementById('tab-positions-btn');
+    const scanBtn = document.getElementById('tab-scanner-btn');
+
+    if (tabName === 'positions') {
+        posContent.classList.remove('hidden');
+        scanContent.classList.add('hidden');
+
+        posBtn.className = "px-4 py-2 text-sm font-semibold text-emerald-400 bg-slate-800 border-b-2 border-emerald-500 rounded-t-lg transition flex items-center gap-2";
+        scanBtn.className = "px-4 py-2 text-sm font-semibold text-slate-400 hover:text-slate-200 border-b-2 border-transparent transition flex items-center gap-2";
+    } else {
+        posContent.classList.add('hidden');
+        scanContent.classList.remove('hidden');
+
+        scanBtn.className = "px-4 py-2 text-sm font-semibold text-emerald-400 bg-slate-800 border-b-2 border-emerald-500 rounded-t-lg transition flex items-center gap-2";
+        posBtn.className = "px-4 py-2 text-sm font-semibold text-slate-400 hover:text-slate-200 border-b-2 border-transparent transition flex items-center gap-2";
+    }
+}
+</script>
 {{ end }}
 
 {{ define "positions-table" }}

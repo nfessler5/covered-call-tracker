@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"embed"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
@@ -9,6 +11,8 @@ import (
 
 	"covered-call-tracker/internal/repository"
 )
+
+var templateFS embed.FS
 
 type UIHandler struct {
 	repo repository.Repository
@@ -21,11 +25,15 @@ type DashboardData struct {
 }
 
 func NewUIHandler(repo repository.Repository) (*UIHandler, error) {
-	tmpl, err := template.ParseFiles("templates/layout.html", "templates/dashboard.html")
+	tmpl, err := template.ParseGlob("templates/*.html")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed parsing templates: %w", err)
 	}
-	return &UIHandler{repo: repo, tmpl: tmpl}, nil
+
+	return &UIHandler{
+		repo: repo,
+		tmpl: tmpl,
+	}, nil
 }
 
 // RenderFullDashboard renders the layout + content on initial visit
@@ -193,4 +201,35 @@ func (h *UIHandler) RollPositionHandler(w http.ResponseWriter, r *http.Request) 
 
 	// Refresh positions table
 	h.RenderPositionsFragment(w, r)
+}
+
+// RenderScannerFragment handles GET /ui/scanner requests and returns the HTMX fragment
+func (h *UIHandler) RenderScannerFragment(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Parse optional query filters
+	minYield, _ := strconv.ParseFloat(r.URL.Query().Get("min_yield"), 64)
+	maxDTE, _ := strconv.Atoi(r.URL.Query().Get("max_dte"))
+
+	filter := repository.ScanFilter{
+		MinYieldPct: minYield,
+		MaxDTE:      maxDTE,
+	}
+
+	// Fetch scanned opportunities from repository or scanner engine
+	candidates, err := h.repo.GetScanCandidates(ctx, filter)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch scanner candidates: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Render HTMX HTML fragment
+	if err := h.tmpl.ExecuteTemplate(w, "scanner_table.html", candidates); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to render template: %v", err), http.StatusInternalServerError)
+	}
+}
+
+// ExecuteTemplate renders a specific template name with provided data
+func (h *UIHandler) ExecuteTemplate(w http.ResponseWriter, name string, data interface{}) error {
+	return h.tmpl.ExecuteTemplate(w, name, data)
 }

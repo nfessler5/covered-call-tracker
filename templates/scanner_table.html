@@ -1,0 +1,122 @@
+{{ define "scanner-table" }}
+<div id="scanner-container" class="space-y-6">
+
+    <!-- Control Bar: Add Ticker + Settings Form -->
+    <form hx-post="/ui/scanner" 
+          hx-target="#scanner-container" 
+          hx-swap="outerHTML"
+          class="bg-slate-800 p-4 rounded-xl border border-slate-700 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
+        
+        <!-- Left Section: Add Ticker Input -->
+        <div class="flex items-center gap-2 w-full lg:w-auto">
+            <input type="text" 
+                   name="ticker" 
+                   placeholder="Enter Ticker (e.g. SPY, AAPL)" 
+                   class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 uppercase focus:outline-none focus:border-emerald-500 w-full sm:w-64">
+            <button type="submit" 
+                    class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg transition whitespace-nowrap">
+                + Add Ticker
+            </button>
+        </div>
+
+        <!-- Right Section: Filters (DTE & Min ROI) -->
+        <div class="flex flex-wrap items-center gap-4 text-xs text-slate-300">
+            <!-- Target DTE -->
+            <div class="flex items-center gap-2">
+                <label for="targetDTE" class="font-medium text-slate-400">Target DTE:</label>
+                <input type="number" 
+                       id="targetDTE"
+                       name="dte" 
+                       value="{{ if .DTE }}{{ .DTE }}{{ else }}7{{ end }}" 
+                       min="1" 
+                       max="365"
+                       hx-post="/ui/scanner"
+                       hx-target="#scanner-container"
+                       hx-swap="outerHTML"
+                       hx-trigger="change delay:300ms"
+                       hx-include="closest form"
+                       class="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 w-16 text-center text-white focus:outline-none focus:border-emerald-500">
+            </div>
+
+            <!-- Minimum ROI % -->
+            <div class="flex items-center gap-2">
+                <label for="minROI" class="font-medium text-slate-400">Min ROI %:</label>
+                <input type="number" 
+                       id="minROI"
+                       name="min_roi" 
+                       step="0.1"
+                       value="{{ if .MinROI }}{{ .MinROI }}{{ else }}1{{ end }}" 
+                       hx-post="/ui/scanner"
+                       hx-target="#scanner-container"
+                       hx-swap="outerHTML"
+                       hx-trigger="change delay:300ms"
+                       hx-include="closest form"
+                       class="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 w-20 text-center text-white focus:outline-none focus:border-emerald-500">
+            </div>
+
+            <!-- Auto-refresh status indicator -->
+            <div class="flex items-center gap-1.5 text-slate-400 border-l border-slate-700 pl-4">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>Auto 60s</span>
+            </div>
+        </div>
+    </form>
+
+    <!-- Scanner Table Component with 60s HTMX Polling -->
+    <div hx-get="/ui/scanner?dte={{ if .DTE }}{{ .DTE }}{{ else }}45{{ end }}&min_roi={{ if .MinROI }}{{ .MinROI }}{{ else }}1.5{{ end }}" 
+         hx-trigger="every 60s" 
+         hx-target="#scanner-container" 
+         hx-swap="outerHTML"
+         class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-xl">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm text-slate-300">
+                <thead class="bg-slate-900/60 text-slate-400 uppercase text-xs border-b border-slate-700">
+                    <tr>
+                        <th class="p-4">Rank</th>
+                        <th class="p-4">Ticker</th>
+                        <th class="p-4">Stock Price</th>
+                        <th class="p-4">Target Strike</th>
+                        <th class="p-4">Est. Premium</th>
+                        <th class="p-4">DTE</th>
+                        <th class="p-4">Max ROI</th>
+                        <th class="p-4">Annualized Yield</th>
+                        <th class="p-4 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-700/50">
+                    {{ range $item := .Candidates }}
+                    <tr class="hover:bg-slate-700/40 transition">
+                        <td class="p-4 font-mono text-xs text-slate-500">#{{ $item.Rank }}</td>
+                        <td class="p-4 font-bold text-white text-base">{{ $item.Ticker }}</td>
+                        <td class="p-4">${{ printf "%.2f" $item.StockPrice }}</td>
+                        <td class="p-4">${{ printf "%.2f" $item.StrikePrice }}</td>
+                        <td class="p-4 text-emerald-400 font-medium">${{ printf "%.2f" $item.Premium }}</td>
+                        <td class="p-4 text-slate-400">{{ $item.DTE }}d ({{ $item.Expiration }})</td>
+                        <td class="p-4 font-bold text-emerald-400 text-base">
+                            {{ printf "%.2f" $item.MaxROI }}%
+                        </td>
+                        <td class="p-4 font-semibold text-purple-400">
+                            {{ printf "%.1f" $item.AnnualizedROI }}%
+                        </td>
+                        <td class="p-4 text-right">
+                            <button hx-delete="/ui/scanner?ticker={{ $item.Ticker }}&dte={{ $.DTE }}&min_roi={{ $.MinROI }}"
+                                    hx-target="#scanner-container"
+                                    hx-swap="outerHTML"
+                                    class="text-xs text-slate-500 hover:text-red-400 transition px-2 py-1 rounded hover:bg-slate-800">
+                                Remove
+                            </button>
+                        </td>
+                    </tr>
+                    {{ else }}
+                    <tr>
+                        <td colspan="9" class="p-8 text-center text-slate-500">
+                            No tickers match the criteria (Min ROI: {{ .MinROI }}%). Add a ticker above or lower the threshold.
+                        </td>
+                    </tr>
+                    {{ end }}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{{ end }}
